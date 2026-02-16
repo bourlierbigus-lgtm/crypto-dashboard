@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>加密货币仪表盘</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: { extend: { colors: {
+    dark: { 900: '#0b0e11', 800: '#12161c', 700: '#1a1f2e', 600: '#252a3a' },
+    accent: '#f0b90b',
+  }}}
+}
+</script>
+<style>
+  body { background: #0b0e11; color: #e2e8f0; font-family: system-ui, sans-serif; }
+  .card { background: #12161c; border: 1px solid #1a1f2e; border-radius: 12px; }
+  .glow { box-shadow: 0 0 20px rgba(240,185,11,0.15); border-color: #f0b90b; }
+  .up { color: #0ecb81; } .down { color: #f6465d; }
+  .loader { display:inline-block; width:20px; height:20px; border:2px solid #333;
+    border-top-color:#f0b90b; border-radius:50%; animation:spin .6s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .fade-in { animation: fadeIn .4s ease-in; }
+  @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:none} }
+</style>
+</head>
+<body class="min-h-screen">
+<div id="app" class="max-w-5xl mx-auto px-4 py-6">
+
+  <!-- Header -->
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-2xl font-bold text-accent">₿ 加密货币仪表盘</h1>
+    <div class="flex items-center gap-3 text-sm text-gray-400">
+      <span id="updated"></span>
+      <button onclick="refresh()" id="refreshBtn"
+        class="px-3 py-1.5 bg-dark-700 hover:bg-dark-600 rounded-lg border border-dark-600
+               transition text-gray-300 text-sm">刷新数据</button>
+    </div>
+  </div>
+
+  <!-- Loading -->
+  <div id="loading" class="text-center py-20">
+    <div class="loader mb-4"></div>
+    <p class="text-gray-400">正在加载数据...</p>
+  </div>
+
+  <!-- Content (hidden until loaded) -->
+  <div id="content" class="hidden fade-in">
+
+    <!-- Price Banner -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+      <div class="card p-5">
+        <div class="text-gray-400 text-sm mb-1">BTC / USDT</div>
+        <div class="flex items-baseline gap-3">
+          <span id="btcPrice" class="text-3xl font-bold"></span>
+          <span id="btcChange" class="text-lg font-medium"></span>
+        </div>
+        <div class="text-xs text-gray-500 mt-1">60日涨幅: <span id="btc60d"></span></div>
+      </div>
+      <div class="card p-5">
+        <div class="text-gray-400 text-sm mb-1">ETH / USDT</div>
+        <div class="flex items-baseline gap-3">
+          <span id="ethPrice" class="text-3xl font-bold"></span>
+          <span id="ethChange" class="text-lg font-medium"></span>
+        </div>
+        <div class="text-xs text-gray-500 mt-1">60日涨幅: <span id="eth60d"></span></div>
+      </div>
+    </div>
+
+    <!-- Indicator Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+
+      <!-- MA Card - BTC -->
+      <div class="card p-5">
+        <h3 class="text-accent font-semibold mb-3">BTC 均线指标</h3>
+        <table class="w-full text-sm">
+          <thead><tr class="text-gray-500 text-xs">
+            <th class="text-left pb-2">均线</th><th class="text-right pb-2">价格</th>
+            <th class="text-right pb-2">偏离</th>
+          </tr></thead>
+          <tbody id="btcMA"></tbody>
+        </table>
+      </div>
+
+      <!-- MA Card - ETH -->
+      <div class="card p-5">
+        <h3 class="text-accent font-semibold mb-3">ETH 均线指标</h3>
+        <table class="w-full text-sm">
+          <thead><tr class="text-gray-500 text-xs">
+            <th class="text-left pb-2">均线</th><th class="text-right pb-2">价格</th>
+            <th class="text-right pb-2">偏离</th>
+          </tr></thead>
+          <tbody id="ethMA"></tbody>
+        </table>
+      </div>
+
+      <!-- Market Sentiment -->
+      <div class="card p-5">
+        <h3 class="text-accent font-semibold mb-3">市场情绪与资金</h3>
+        <div class="space-y-3" id="sentiment"></div>
+      </div>
+
+      <!-- On-chain -->
+      <div class="card p-5">
+        <h3 class="text-accent font-semibold mb-3">链上指标</h3>
+        <div class="space-y-3" id="onchain"></div>
+      </div>
+    </div>
+
+    <!-- Signals -->
+    <div id="signalBox" class="card p-5 mb-6">
+      <h3 class="text-accent font-semibold mb-3">系统判断</h3>
+      <div id="signals" class="space-y-2"></div>
+      <div id="highProb" class="hidden mt-4 p-4 rounded-lg bg-yellow-900/30 border border-yellow-600 text-yellow-200 font-medium">
+        🚨 系统进入极高胜率区间 — AHR999 &lt; 0.45 且价格低于 MA200，历史上此区间买入持有1年以上胜率极高。
+      </div>
+    </div>
+
+    <p class="text-center text-xs text-gray-600 pb-6">数据仅供参考，不构成投资建议。</p>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmtP = v => v != null ? (v >= 10000 ? `$${v.toLocaleString('en',{maximumFractionDigits:0})}` : `$${v.toLocaleString('en',{minimumFractionDigits:2,maximumFractionDigits:2})}`) : 'N/A';
+const fmtPct = v => v != null ? `${v >= 0 ? '+' : ''}${v.toFixed(2)}%` : 'N/A';
+const fmtFlow = v => { if(v==null) return 'N/A'; return Math.abs(v)>=1000 ? `${(v/1000).toFixed(2)}B` : `${v>=0?'+':''}${v.toFixed(1)}M`; };
+const fmtOI = v => { if(v==null) return 'N/A'; return v>=1e9 ? `$${(v/1e9).toFixed(2)}B` : `$${(v/1e6).toFixed(0)}M`; };
+const fmtV = (v,d=4) => v != null ? v.toFixed(d) : 'N/A';
+
+const iconMap = { check:'✅', warn:'⚠️', red:'🔴', yellow:'🟡', green:'🟢', neutral:'😐' };
+
+function renderMA(tbodyId, coin) {
+  const tb = $(tbodyId); tb.innerHTML = '';
+  for (const [name, val] of Object.entries(coin.mas || {})) {
+    const diff = val != null ? ((coin.price - val) / val * 100) : null;
+    const cls = diff != null ? (diff >= 0 ? 'up' : 'down') : '';
+    tb.innerHTML += `<tr class="border-t border-dark-700">
+      <td class="py-1.5 text-gray-300">${name}</td>
+      <td class="py-1.5 text-right">${fmtP(val)}</td>
+      <td class="py-1.5 text-right ${cls}">${diff != null ? fmtPct(diff) : 'N/A'}</td></tr>`;
+  }
+}
+
+function renderRow(label, value) {
+  return `<div class="flex justify-between items-center py-1.5 border-b border-dark-700 last:border-0">
+    <span class="text-gray-400 text-sm">${label}</span>
+    <span class="text-sm font-medium">${value}</span></div>`;
+}
+
+function render(d) {
+  $('loading').classList.add('hidden');
+  $('content').classList.remove('hidden');
+  $('updated').textContent = `更新: ${d.updated_at}`;
+
+  // Prices
+  $('btcPrice').textContent = fmtP(d.btc.price);
+  const bc = d.btc.change_24h;
+  $('btcChange').textContent = fmtPct(bc);
+  $('btcChange').className = `text-lg font-medium ${bc>=0?'up':'down'}`;
+  $('btc60d').textContent = fmtPct(d.btc.change_60d);
+
+  $('ethPrice').textContent = fmtP(d.eth.price);
+  const ec = d.eth.change_24h;
+  $('ethChange').textContent = fmtPct(ec);
+  $('ethChange').className = `text-lg font-medium ${ec>=0?'up':'down'}`;
+  $('eth60d').textContent = fmtPct(d.eth.change_60d);
+
+  renderMA('btcMA', d.btc);
+  renderMA('ethMA', d.eth);
+
+  // Sentiment
+  let s = '';
+  const fg = d.fear_greed;
+  s += renderRow('恐慌贪婪指数', fg ? `${fg.value} (${fg.label})` : 'N/A');
+  const etf = d.etf;
+  s += renderRow('BTC ETF 日净流入', etf ? `${fmtFlow(etf.daily_flow_m)} (${etf.date})` : 'N/A');
+  s += renderRow('ETF 近5日净流入', etf ? fmtFlow(etf.recent_5d_flow_m) : 'N/A');
+  const oi = d.open_interest;
+  s += renderRow('合约持仓 (Binance)', oi ? fmtOI(oi.oi_usd) : 'N/A');
+  s += renderRow('资金费率', d.funding_rate != null ? `${d.funding_rate}%` : 'N/A');
+  $('sentiment').innerHTML = s;
+
+  // On-chain
+  let o = '';
+  const oc = d.onchain || {};
+  o += renderRow('AHR999', `${fmtV(oc.ahr999)} <span class="text-xs text-gray-500 ml-1">&lt;0.45 抄底 | 0.45-1.2 定投</span>`);
+  o += renderRow('NUPL', `${fmtV(oc.nupl)} <span class="text-xs text-gray-500 ml-1">&lt;0 投降 | &gt;0.75 贪婪</span>`);
+  o += renderRow('MVRV Z-Score', `${fmtV(oc.mvrv_zscore)} <span class="text-xs text-gray-500 ml-1">&lt;0 低估 | &gt;7 高估</span>`);
+  if (oc.mvrv != null) o += renderRow('MVRV', fmtV(oc.mvrv));
+  if (oc.market_cap) o += renderRow('BTC 总市值', `$${(oc.market_cap/1e12).toFixed(2)}T`);
+  $('onchain').innerHTML = o;
+
+  // Signals
+  let sg = '';
+  for (const sig of d.signals || []) {
+    sg += `<div class="flex items-center gap-2 text-sm">
+      <span>${iconMap[sig.icon]||'•'}</span><span>${sig.text}</span></div>`;
+  }
+  $('signals').innerHTML = sg;
+
+  if (d.high_probability_zone) {
+    $('highProb').classList.remove('hidden');
+    $('signalBox').classList.add('glow');
+  } else {
+    $('highProb').classList.add('hidden');
+    $('signalBox').classList.remove('glow');
+  }
+}
+
+async function loadData() {
+  try {
+    const r = await fetch('/api/report');
+    const d = await r.json();
+    if (!d.error) render(d);
+  } catch(e) { console.error(e); }
+}
+
+async function refresh() {
+  const btn = $('refreshBtn');
+  btn.disabled = true; btn.textContent = '刷新中...';
+  try {
+    const r = await fetch('/api/refresh');
+    const d = await r.json();
+    if (!d.error) render(d);
+  } catch(e) { console.error(e); }
+  btn.disabled = false; btn.textContent = '刷新数据';
+}
+
+loadData();
+</script>
+</body>
+</html>
