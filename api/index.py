@@ -172,14 +172,35 @@ def collect():
 
     onchain = {"ahr999": ahr999, "nupl": None, "mvrv": None, "mvrv_zscore": None,
                "market_cap": None}
+
+    # 从 GitHub 获取 Playwright 采集的链上数据
     try:
-        r = requests.get("https://api.blockchain.info/charts/market-cap",
-                         params={"timespan": "1days", "format": "json"}, timeout=10)
+        r = requests.get(
+            "https://raw.githubusercontent.com/bourlierbigus-lgtm/crypto-dashboard/main/data/onchain.json",
+            timeout=5)
         if r.ok:
-            vals = r.json().get("values", [])
-            if vals: onchain["market_cap"] = vals[-1]["y"]
+            gh_data = r.json()
+            onchain["nupl"] = gh_data.get("nupl")
+            onchain["mvrv"] = gh_data.get("mvrv")
+            onchain["mvrv_zscore"] = gh_data.get("mvrv_zscore")
+            if gh_data.get("market_cap"):
+                onchain["market_cap"] = gh_data["market_cap"]
+            if gh_data.get("realized_cap"):
+                onchain["realized_cap"] = gh_data["realized_cap"]
     except Exception:
         pass
+
+    # fallback: blockchain.info market cap
+    if not onchain.get("market_cap"):
+        try:
+            r = requests.get("https://api.blockchain.info/charts/market-cap",
+                             params={"timespan": "1days", "format": "json"}, timeout=10)
+            if r.ok:
+                vals = r.json().get("values", [])
+                if vals:
+                    onchain["market_cap"] = vals[-1]["y"]
+        except Exception:
+            pass
 
     signals = []
     ma200 = btc["mas"].get("MA200")
