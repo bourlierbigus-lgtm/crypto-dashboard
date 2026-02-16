@@ -38,6 +38,12 @@ def fetch_klines(symbol: str, days: int = 365) -> pd.DataFrame:
         r = requests.get(url, params={"symbol": symbol, "interval": "1d",
                                        "endTime": end_time, "limit": limit},
                          headers=HEADERS, timeout=15)
+        if r.status_code == 451:
+            # Binance 屏蔽美国 IP，尝试备用域名
+            r = requests.get(url.replace("api.binance.com", "data-api.binance.vision"),
+                             params={"symbol": symbol, "interval": "1d",
+                                     "endTime": end_time, "limit": limit},
+                             headers=HEADERS, timeout=15)
         r.raise_for_status()
         data = r.json()
         if not data:
@@ -234,10 +240,13 @@ async def report():
     now = time.time()
     if _cache["data"] and now - _cache["ts"] < CACHE_TTL:
         return _cache["data"]
-    data = sanitize(collect())
-    _cache["data"] = data
-    _cache["ts"] = now
-    return data
+    try:
+        data = sanitize(collect())
+        _cache["data"] = data
+        _cache["ts"] = now
+        return data
+    except Exception as e:
+        return {"error": str(e), "updated_at": datetime.now(CST).strftime("%Y-%m-%d %H:%M CST")}
 
 
 @app.get("/api/refresh")
