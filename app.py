@@ -23,6 +23,24 @@ CST = timezone(timedelta(hours=8))
 _cache: dict | None = None
 
 
+def sanitize(obj):
+    """递归将 numpy 类型转为 Python 原生类型，确保 JSON 可序列化"""
+    import numpy as np
+    if isinstance(obj, dict):
+        return {k: sanitize(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [sanitize(v) for v in obj]
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (np.floating,)):
+        return float(obj)
+    if isinstance(obj, (np.bool_,)):
+        return bool(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    return obj
+
+
 def fetch_24h_change(symbol: str) -> float | None:
     try:
         r = requests.get(
@@ -64,14 +82,14 @@ def collect_all_data() -> dict:
                  and btc["price"] < btc["mas"]["MA200"])
 
     now = datetime.now(CST)
-    return {
+    return sanitize({
         "updated_at": now.strftime("%Y-%m-%d %H:%M CST"),
         "btc": btc, "eth": eth,
         "fear_greed": fng, "etf": etf,
         "open_interest": oi, "funding_rate": funding,
         "onchain": onchain, "signals": signals,
         "high_probability_zone": high_prob,
-    }
+    })
 
 
 def build_signals(btc, fng, funding, etf, ahr999) -> list[dict]:
